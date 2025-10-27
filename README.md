@@ -1,4 +1,4 @@
-# MIRI-JWST-Data
+
 
 # MIRI JWST Data Analysis - NGC 7469
 
