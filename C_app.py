@@ -1,194 +1,210 @@
-# ---------------------------------------------------------------
-# MIRI JWST Data — Analysis of NGC 7469 (Simulated / Real-Data Friendly)
-# Fixed: correct angular -> physical size conversion using astropy equivalencies
-# Author: Sankalp Sharma (updated)
-# ---------------------------------------------------------------
+# app.py
+"""
+Streamlit Dashboard — MIRI JWST Analysis: NGC 7469
+Author: Sankalp Sharma | v2.0
+Features:
+- Tabs: Overview | Image Visualization | Spectral Analysis | Flux Map | Exports
+- Upload real JWST MIRI FITS cube (auto-detect SCI extension) or use simulated cube
+- Cosmology inputs and pixel -> physical scale conversion using astropy equivalencies
+- Interactive slice selector, ROI controls, log scaling, colormap choices
+- Spectral extraction (center vs ring), flux-ratio, radial profile
+- Download CSV / PNG / text report
+"""
 
+import io
 import os
+from typing import Tuple, Dict
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import plotly.express as px
+import streamlit as st
 from astropy.io import fits
 from astropy.cosmology import FlatLambdaCDM
 import astropy.units as u
 
 sns.set_style("whitegrid")
+plt.rcParams["figure.dpi"] = 120
 
-# 1. Basic object metadata
-object_name = "NGC 7469"
-ra = "23h 03m 15.61s"
-dec = "+08d 52m 26.0s"
-distance_mpc = 62.1
-redshift_z = 0.016335
-object_category = "Galaxy"
-object_subcategory = "Seyfert 1 Galaxy, Starburst Galaxy"
-
-print(f"Analyzing {object_name} ({object_subcategory}) — z={redshift_z}")
-
-# 2. Role of Mid-Infrared Imaging
-print("""
-Mid-Infrared (MIR) observations (e.g., from MIRI on JWST) allow dust-enshrouded
-star-forming regions and AGN-heated dust to be probed. They can penetrate regions
-that optical/NIR cannot.
-""")
-
-# 3. Cosmological scaling
-cosmo = FlatLambdaCDM(H0=70, Om0=0.3)
-ang_diam_dist = cosmo.angular_diameter_distance(redshift_z).to(u.Mpc)
-print(f"Angular Diameter Distance: {ang_diam_dist:.4g}")
-
-# 4. Provide paths and simulation fallback
-fits_path = "Data/jw01328-c1006_t014_miri_ch1-short_s3d.fits"
-
-if os.path.exists(fits_path):
-    # Real-data branch
-    with fits.open(fits_path) as hdul:
-        # try common SCI extension names; fallback to 0th
-        if "SCI" in hdul:
-            sci_hdu = hdul["SCI"]
-        else:
-            sci_hdu = hdul[0]
-        sci_data = np.array(sci_hdu.data)
-        header = sci_hdu.header
-
-    # Extract pixel scale: assume CDELT1 is in degrees/pixel (common)
-    # Use astropy units explicitly
-    cdelt1 = header.get("CDELT1", None)
-    if cdelt1 is None:
-        # try alternative header keys (CDELT1 might be absent for some cubes)
-        cdelt1 = header.get("CD1_1", None)
-    if cdelt1 is None:
-        raise KeyError("No CDELT1 or CD1_1 found in FITS header. Cannot deduce pixel scale.")
-
-    pixel_scale_deg = float(cdelt1) * u.deg
-    pixel_scale_arcsec = pixel_scale_deg.to(u.arcsec)
-    theta_rad = pixel_scale_arcsec.to(u.rad)
-
-    # Correct conversion: linear size = angular diameter distance * angle (radians)
-    # Use equivalencies because we're converting an angle*distance quantity to a length unit
-    pixel_scale_pc = (ang_diam_dist * theta_rad).to(u.pc, equivalencies=u.dimensionless_angles())
-
-    print(f"Pixel scale: {pixel_scale_arcsec:.4g} per pixel ≈ {pixel_scale_pc:.4g} per pixel")
-
-else:
-    # Simulation branch (no FITS present)
-    print("** Note: FITS file not found. Using synthetic data for demonstration. **")
-    # Simulate a 3-D cube: shape [wavelength_slice, y, x]
-    nx, ny = 150, 150
-    nwav = 30
-    wavelengths = np.linspace(5.0, 12.0, nwav)  # microns
-
-    # create synthetic spatial cube: gaussian ring + central peak; wavelength-dependent modulations
+# -----------------------------
+# Utility functions
+# -----------------------------
+@st.cache_data
+def generate_synthetic_cube(nx=150, ny=150, nwav=30, wav_min=5.0, wav_max=12.0, seed=42):
+    """Return synthetic cube (nwav, ny, nx) and wavelengths (um)."""
+    rng = np.random.default_rng(seed)
+    wavelengths = np.linspace(wav_min, wav_max, nwav)
     x = np.linspace(-1, 1, nx)
     y = np.linspace(-1, 1, ny)
     X, Y = np.meshgrid(x, y)
     R = np.sqrt(X**2 + Y**2)
+
     ring = np.exp(-((R - 0.6) / 0.2) ** 2)
     center = np.exp(-((R) / 0.2) ** 2)
 
-    sci_data = np.zeros((nwav, ny, nx))
+    sci = np.zeros((nwav, ny, nx))
     for i, w in enumerate(wavelengths):
-        sci_data[i] = (
-            center * (1 + 0.5 * np.sin(2 * np.pi * (w - 5) / 7))
-            + 0.5 * ring * (1 + 0.3 * np.cos(2 * np.pi * (w - 5) / 3))
-            + 0.08 * np.random.randn(ny, nx)
+        sci[i] = (
+            center * (1 + 0.5 * np.sin(2 * np.pi * (w - wav_min) / (wav_max - wav_min)))
+            + 0.5 * ring * (1 + 0.3 * np.cos(2 * np.pi * (w - wav_min) / 3.0))
+            + 0.08 * rng.normal(size=(ny, nx))
         )
+    return sci, wavelengths
 
-    # Provide a realistic-ish placeholder pixel scale (deg/pix)
-    header = {"CDELT1": 0.00015}  # degrees per pixel (placeholder)
-    pixel_scale_deg = float(header["CDELT1"]) * u.deg
+@st.cache_data
+def load_fits_cube(file_like) -> Tuple[np.ndarray, dict]:
+    """Load a FITS cube from path or uploaded file-like object.
+    Returns sci_data (numpy array) and header (dict)."""
+    # file_like can be an UploadedFile or filepath
+    if hasattr(file_like, "read"):
+        header = {}
+        with fits.open(file_like) as hdul:
+            if "SCI" in hdul:
+                hdu = hdul["SCI"]
+            else:
+                hdu = hdul[0]
+            data = np.array(hdu.data)
+            header = dict(hdu.header)
+    else:
+        with fits.open(str(file_like)) as hdul:
+            if "SCI" in hdul:
+                hdu = hdul["SCI"]
+            else:
+                hdu = hdul[0]
+            data = np.array(hdu.data)
+            header = dict(hdu.header)
+    # Normalize dims: want (nwav, ny, nx)
+    data = np.squeeze(data)
+    if data.ndim == 3:
+        # heuristics: if first axis > last axis and length small, assume (lambda,y,x)
+        # if shape (y,x,l) transpose:
+        if data.shape[0] < 10 and data.shape[-1] > 10:
+            data = np.transpose(data, (2, 0, 1))
+    elif data.ndim == 2:
+        data = data[None, ...]
+    return data, header
+
+def header_pixel_scale(header: dict):
+    """Try to extract pixel scale (deg/pix) from header keys (CDELT1, CD1_1, PIXSCALE)."""
+    if not header:
+        return None
+    for key in ("CDELT1", "CD1_1", "PIXSCALE", "PC1_1"):
+        if key in header and header[key] is not None:
+            try:
+                val = float(header[key])
+                # If header PIXSCALE typically is arcsec/pix sometimes; handle both
+                # Heuristic: if value > 1e-2 assume arcsec (e.g. 0.1), if < 0.01 assume deg (e.g. 1.5e-4)
+                if val > 1.0:  # arcsec/pix typical > 0.01; if >1 assume arcsec
+                    return (val * u.arcsec).to(u.deg)
+                # otherwise treat as deg directly
+                return (val * u.deg)
+            except Exception:
+                continue
+    return None
+
+def compute_physical_scale(pixel_scale_deg: u.Quantity, redshift_z: float, H0=70.0, Om0=0.3):
+    """Return pixel scale as (arcsec/pix, pc/pix) given pixel_scale_deg (Quantity)."""
+    cosmo = FlatLambdaCDM(H0=H0, Om0=Om0)
+    ang_diam_dist = cosmo.angular_diameter_distance(redshift_z)
     pixel_scale_arcsec = pixel_scale_deg.to(u.arcsec)
     theta_rad = pixel_scale_arcsec.to(u.rad)
+    # Use equivalencies to convert distance*angle -> length
     pixel_scale_pc = (ang_diam_dist * theta_rad).to(u.pc, equivalencies=u.dimensionless_angles())
+    return pixel_scale_arcsec, pixel_scale_pc, ang_diam_dist
 
-    print(f"(Simulated) Pixel scale: {pixel_scale_arcsec:.4g} per pixel ≈ {pixel_scale_pc:.4g} per pixel")
+def make_center_ring_masks(ny: int, nx: int, center_radius: int, ring_inner: int, ring_outer: int):
+    cy, cx = ny // 2, nx // 2
+    Y, X = np.indices((ny, nx))
+    R = np.sqrt((X - cx) ** 2 + (Y - cy) ** 2)
+    center_mask = R <= center_radius
+    ring_mask = (R >= ring_inner) & (R <= ring_outer)
+    return center_mask, ring_mask
 
-# 5. Image inspection (choose a mid-wavelength slice)
-if isinstance(sci_data, np.ndarray) and sci_data.ndim == 3:
-    mid_idx = sci_data.shape[0] // 2
-    image_slice = sci_data[mid_idx]
-    plt.figure(figsize=(7, 6))
-    plt.imshow(image_slice, origin="lower", cmap="inferno", interpolation="nearest")
-    plt.colorbar(label="Flux (arb units)")
-    plt.title(f"{object_name} – MIRI MIR Slice (index {mid_idx})")
-    plt.xlabel("X pixel")
-    plt.ylabel("Y pixel")
-    plt.tight_layout()
-    plt.show()
+def fig_to_bytes(fig, fmt="png"):
+    buf = io.BytesIO()
+    fig.savefig(buf, format=fmt, bbox_inches="tight", dpi=150)
+    buf.seek(0)
+    return buf
 
-    # Flux histogram
-    plt.figure(figsize=(7, 5))
-    sns.histplot(image_slice.flatten(), bins=40, kde=True)
-    plt.xlabel("Flux (arb units)")
-    plt.ylabel("Pixel count")
-    plt.title("Flux distribution (middle wavelength slice)")
-    plt.tight_layout()
-    plt.show()
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+st.set_page_config(page_title="MIRI Explorer — NGC 7469", layout="wide", page_icon="🔭")
+st.sidebar.title("MIRI — NGC 7469")
+st.sidebar.markdown("Sankalp Sharma | v2.0  •  Streamlit demo")
+
+# Top-level metadata / cosmology controls
+with st.sidebar.expander("Cosmology & Pixel scale", expanded=True):
+    H0 = st.number_input("H0 (km/s/Mpc)", value=70.0, step=1.0)
+    Om0 = st.number_input("Om0 (Ωm)", value=0.3, step=0.01, format="%.2f")
+    redshift_z = st.number_input("Redshift (z)", value=0.016335, format="%.6f")
+    st.markdown("---")
+
+# Data source: upload or simulate
+st.sidebar.header("Data Source")
+use_sim = st.sidebar.checkbox("Use built-in simulated cube", value=True)
+uploaded = st.sidebar.file_uploader("Upload MIRI FITS cube (HLSP / s3d)", type=["fits", "fz"])
+
+# Visualization options
+st.sidebar.header("Visualization Options")
+colormap = st.sidebar.selectbox("Colormap", ["magma", "inferno", "viridis", "plasma", "cividis"])
+use_log = st.sidebar.checkbox("Log scale for images", value=False)
+show_colorbar = st.sidebar.checkbox("Show colorbar", value=True)
+st.sidebar.markdown("---")
+
+# ROI & extraction defaults
+st.sidebar.header("ROI (center & ring)")
+default_center_radius = 8
+center_radius = st.sidebar.slider("Center radius (pix)", 1, 60, default_center_radius)
+ring_inner = st.sidebar.slider("Ring inner radius (pix)", center_radius + 1, 120, default_center_radius + 6)
+ring_outer = st.sidebar.slider("Ring outer radius (pix)", ring_inner + 1, 140, ring_inner + 8)
+
+# Create or load data
+sci_data = None
+header = {}
+wavelengths = None
+using_real = False
+
+if uploaded is not None and not use_sim:
+    st.sidebar.info("Using uploaded FITS cube.")
+    try:
+        sci_data, header = load_fits_cube(uploaded)
+        using_real = True
+    except Exception as e:
+        st.sidebar.error(f"Failed to load FITS: {e}. Falling back to simulated cube.")
+        sci_data, wavelengths = generate_synthetic_cube()
+        header = {}
+        using_real = False
 else:
-    print("sci_data does not look like a 3D cube. Skipping image inspection.")
+    sci_data, wavelengths = generate_synthetic_cube()
+    header = {}
+    using_real = False
 
-# 6. Spectral extraction simulation (or placeholder for real extraction)
-# If you have real region-extraction code, replace the simulated extraction below.
-if "wavelengths" not in locals():
-    wavelengths = np.linspace(5.0, 12.0, 500)
+# Normalize shape: ensure (nwav, ny, nx)
+sci_data = np.squeeze(sci_data)
+if sci_data.ndim == 2:
+    sci_data = sci_data[None, ...]
+nwav, ny, nx = sci_data.shape
 
-center_flux = np.exp(-0.5 * ((wavelengths - 7.0) / 0.4) ** 2) + 0.2 * np.random.rand(len(wavelengths))
-ring_flux = 0.8 * np.exp(-0.5 * ((wavelengths - 7.3) / 0.6) ** 2) + 0.15 * np.random.rand(len(wavelengths))
+# Wavelength vector if missing
+if wavelengths is None:
+    # guess or make a default vector
+    wavelengths = np.linspace(5.0, 12.0, nwav)
 
-df_center = pd.DataFrame({"Wavelength (µm)": wavelengths, "Flux": center_flux})
-df_ring = pd.DataFrame({"Wavelength (µm)": wavelengths, "Flux": ring_flux})
+# Pixel scale calculation
+pix_scale_deg = header_pixel_scale(header) if header else None
+if pix_scale_deg is None:
+    # fallback placeholder
+    pix_scale_deg = 0.00015 * u.deg
 
-# 7. Spectra comparison
-plt.figure(figsize=(10, 6))
-plt.plot(df_center["Wavelength (µm)"], df_center["Flux"], label="Center Region", linewidth=1.3)
-plt.plot(df_ring["Wavelength (µm)"], df_ring["Flux"], label="Ring Region", alpha=0.8)
-plt.xlabel("Wavelength (µm)")
-plt.ylabel("Flux (arb units)")
-plt.title(f"Spectrum Comparison — {object_name}")
-plt.legend()
-plt.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.show()
+pix_scale_arcsec, pix_scale_pc, ang_diam_dist = compute_physical_scale(pix_scale_deg, redshift_z, H0=H0, Om0=Om0)
 
-# 8. Flux Ratio curve
-df_fluxratio = df_center.copy()
-df_fluxratio["Flux_Ratio_Center_to_Ring"] = df_center["Flux"] / (df_ring["Flux"] + 1e-9)
-
-plt.figure(figsize=(10, 5))
-plt.plot(df_fluxratio["Wavelength (µm)"], df_fluxratio["Flux_Ratio_Center_to_Ring"], color="crimson")
-plt.axhline(1.0, linestyle="--", color="gray", label="Ratio = 1")
-plt.xlabel("Wavelength (µm)")
-plt.ylabel("Flux Ratio (Center/Ring)")
-plt.title("Center-to-Ring Flux Ratio vs Wavelength")
-plt.legend()
-plt.tight_layout()
-plt.show()
-
-# 9. Heatmap of average flux map (spatial average over wavelengths)
-if isinstance(sci_data, np.ndarray) and sci_data.ndim == 3:
-    avg_flux_map = np.mean(sci_data, axis=0)
-    plt.figure(figsize=(8, 7))
-    sns.heatmap(avg_flux_map, cmap="magma", cbar_kws={"label": "Average Flux (arb units)"})
-    plt.title(f"Average Flux Map — {object_name}")
-    plt.xlabel("X pixel")
-    plt.ylabel("Y pixel")
-    plt.tight_layout()
-    plt.show()
-
-# 10. Save outputs
-os.makedirs("Outputs", exist_ok=True)
-df_center.to_csv("Outputs/center_spectrum.csv", index=False)
-df_ring.to_csv("Outputs/ring_spectrum.csv", index=False)
-print("✅ Analysis complete. CSV outputs saved in 'Outputs/'")
-
-# 11. Notes for real-data usage
-print("""
-Notes:
-- The correct formula for linear size per pixel is:
-    linear_size = angular_diameter_distance * angle_in_radians
-  and we convert using `equivalencies=u.dimensionless_angles()` so astropy
-  knows an angle*distance is a length.
-- If you run with real FITS data, inspect header keys: CDELT1, CD1_1, CRPIX*, WCS info.
-- For real spectral extraction replace the simulated extraction with aperture/region code.
-""")
+# Sidebar summary
+with st.sidebar.expander("Dataset summary", expanded=True):
+    st.write(f"Using: {'Uploaded FITS' if using_real else 'Simulated cube'}")
+    st.write(f"Cube shape (nwav, ny, nx): {sci_data.shape}")
+    st.write(f"Wavelengths (μm): {wavelengths[0]:.2f} — {wavelengths[-1]:.2f}")
+    st.write(f"Pixel scale: {pix_scale_arcsec:.4f} /pix  ≈  {pix_scale_pc:.3f} pc/pix")
+    st.write(f"Angular diameter distance: {an
