@@ -336,9 +336,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Contact
 
-**Project Lead**: [Your Name]  
-**Email**: [your.email@institution.edu]  
-**Institution**: [Your Institution/Affiliation]  
+**Project Lead**: Sankalp
+**Email**: workwithsankalp008@gmail.com
+**Institution**: Self 
 
 **Issues**: [GitHub Issues](https://github.com/your-username/miri-jwst-ngc7469/issues)  
 **Discussions**: [GitHub Discussions](https://github.com/your-username/miri-jwst-ngc7469/discussions)
