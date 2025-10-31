@@ -12,6 +12,60 @@ A comprehensive data analysis pipeline for JWST MIRI observations of the Seyfert
 ## 📋 Project Overview
 
 **NGC 7469** is a remarkable nearby Seyfert 1 galaxy with concurrent starburst activity, making it an ideal laboratory for studying AGN-starburst connections. This repository contains a complete analysis pipeline for MIRI data, featuring advanced visualization, spectral analysis, and morphological characterization.
+Of course! Here are professional, well-structured README entries for your GitHub repository to showcase your Streamlit deployments.
+
+### For a Single Project Section:
+
+---
+
+## 🚀 Live Demo
+
+The application is deployed and accessible via Streamlit Community Cloud:
+
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://miri-jwst-data-9pywng7vcyenujsiyruurr.streamlit.app/)
+
+**Live URL:** https://miri-jwst-data-9pywng7vcyenujsiyruurr.streamlit.app/
+
+---
+
+### For Multiple Deployments (Recommended):
+
+---
+
+## 🌐 Live Deployments
+
+These interactive web applications are publicly deployed using Streamlit Community Cloud for immediate access and demonstration:
+
+| Application | Description | Live Demo |
+|-------------|-------------|-----------|
+| **MIRI JWST Data Analyzer** | Interactive analysis and visualization tool for James Webb Space Telescope MIRI instrument data. | [![Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://miri-jwst-data-9pywng7vcyenujsiyruurr.streamlit.app/) |
+| **Advanced MIRI Data Explorer** | Enhanced version with additional analytical capabilities and visualization options for JWST MIRI datasets. | [![Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://miri-jwst-data-nik97tjgtf4e5ditfes2an.streamlit.app/) |
+
+**Quick Access:**
+- **Primary App:** https://miri-jwst-data-9pywng7vcyenujsiyruurr.streamlit.app/
+- **Advanced App:** https://miri-jwst-data-nik97tjgtf4e5ditfes2an.streamlit.app/
+
+---
+
+### Alternative Compact Version:
+
+---
+
+## 🔗 Live Demos
+
+**Streamlit Deployments:**
+
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://miri-jwst-data-9pywng7vcyenujsiyruurr.streamlit.app/) **Main Application**  
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://miri-jwst-data-nik97tjgtf4e5ditfes2an.streamlit.app/) **Advanced Version**
+
+**Direct Links:**
+- Main App: `https://miri-jwst-data-9pywng7vcyenujsiyruurr.streamlit.app/`
+- Advanced App: `https://miri-jwst-data-nik97tjgtf4e5ditfes2an.streamlit.app/`
+
+---
+
+**Choose the format that best fits your README structure!** The table format (second option) is particularly professional as it clearly distinguishes between your different deployments and provides context for each one.
+
 
 ### Key Features
 - **Advanced Data Visualization**: Multi-panel figures, 3D surface plots, and interactive dashboards
