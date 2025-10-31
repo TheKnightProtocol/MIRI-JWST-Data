@@ -28,7 +28,7 @@ The application is deployed and accessible via Streamlit Community Cloud:
 
 ---
 
-### For Multiple Deployments (Recommended):
+### Multiple Deployments :
 
 ---
 
@@ -64,7 +64,6 @@ These interactive web applications are publicly deployed using Streamlit Communi
 
 ---
 
-**Choose the format that best fits your README structure!** The table format (second option) is particularly professional as it clearly distinguishes between your different deployments and provides context for each one.
 
 
 ### Key Features
