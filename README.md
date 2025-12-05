@@ -12,7 +12,7 @@ A comprehensive data analysis pipeline for JWST MIRI observations of the Seyfert
 ## 📋 Project Overview
 
 **NGC 7469** is a remarkable nearby Seyfert 1 galaxy with concurrent starburst activity, making it an ideal laboratory for studying AGN-starburst connections. This repository contains a complete analysis pipeline for MIRI data, featuring advanced visualization, spectral analysis, and morphological characterization.
-Of course! Here are professional, well-structured README entries for your GitHub repository to showcase your Streamlit deployments.
+
 
 ### For a Single Project Section:
 
